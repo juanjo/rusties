@@ -7,8 +7,8 @@ use std::net::SocketAddr;
 
 // Routes Regex
 lazy_static! {
-    static ref ENCRYPT_PATH: Regex = Regex::new("^/encrypt/.*").unwrap();
-    static ref DECRYPT_PATH: Regex = Regex::new("^/decrypt/.*").unwrap();
+    static ref ENCRYPT_PATH: Regex = Regex::new(r"^/encrypt/(?P<payload>.*)").unwrap();
+    static ref DECRYPT_PATH: Regex = Regex::new(r"^/decrypt/(?P<payload>.*)").unwrap();
 }
 
 async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
@@ -16,10 +16,23 @@ async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
 
     match (req.method(), req.uri().path()) {
         (&Method::GET, path) if ENCRYPT_PATH.is_match(path) => {
-            *response.body_mut() = Body::from(format!("Encrypted: {}", path));
+            let encrypt_str = ENCRYPT_PATH
+                .captures(path)
+                .unwrap()
+                .name("payload")
+                .unwrap()
+                .as_str();
+
+            *response.body_mut() = Body::from(format!("Encrypted: {}", encrypt_str));
         }
         (&Method::GET, path) if DECRYPT_PATH.is_match(path) => {
-            *response.body_mut() = Body::from(format!("Decrypted: {}", path));
+            let decrypt_str = DECRYPT_PATH
+                .captures(path)
+                .unwrap()
+                .name("payload")
+                .unwrap()
+                .as_str();
+            *response.body_mut() = Body::from(format!("Decrypted: {}", decrypt_str));
         }
         _ => {
             *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
