@@ -11,6 +11,13 @@ lazy_static! {
     static ref DECRYPT_PATH: Regex = Regex::new(r"^/decrypt/(?P<payload>.*)").unwrap();
 }
 
+async fn shutdown_signal() {
+    // Wait for the CTRL+C signal
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install CTRL+C signal handler");
+}
+
 async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let mut response = Response::new(Body::empty());
 
@@ -54,8 +61,11 @@ async fn main() {
     // Bind service to the socket and serve
     let server = Server::bind(&addr).serve(service);
 
+    // Graceful shutdown signal
+    let graceful = server.with_graceful_shutdown(shutdown_signal());
+
     // we capture all errors
-    if let Err(e) = server.await {
+    if let Err(e) = graceful.await {
         eprintln!("server error: {}", e);
     }
 }
