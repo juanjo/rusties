@@ -1,3 +1,5 @@
+use futures::prelude::*;
+
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use lazy_static::lazy_static;
@@ -47,7 +49,7 @@ async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
         }
     }
 
-    Ok(response)
+    future::ok(response).await
 }
 
 #[tokio::main]
