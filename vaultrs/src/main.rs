@@ -1,3 +1,5 @@
+extern crate base64;
+
 use futures::prelude::*;
 use hashicorp_vault::client::VaultClient as Client;
 use hyper::service::{make_service_fn, service_fn};
@@ -37,7 +39,12 @@ async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
                 .unwrap()
                 .as_str();
 
-            *response.body_mut() = Body::from(format!("Encrypted: {}", encrypt_str));
+            // TODO: Move this to a function and pass the client as a reference
+            let client = Client::new(HOST, TOKEN).unwrap();
+            let key_id = "farm";
+            let enc_resp = client.transit_encrypt(None, key_id, encrypt_str).unwrap();
+
+            *response.body_mut() = Body::from(format!("Encrypted: {}", base64::encode(enc_resp)));
         }
         (&Method::GET, path) if DECRYPT_PATH.is_match(path) => {
             let decrypt_str = DECRYPT_PATH
@@ -46,7 +53,17 @@ async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
                 .name("payload")
                 .unwrap()
                 .as_str();
-            *response.body_mut() = Body::from(format!("Decrypted: {}", decrypt_str));
+
+            // TODO: Move this to a function and pass the client as a reference
+            // TODO: Pass the key_id in the URL
+            let key_id = "farm";
+            let decoded = base64::decode(decrypt_str).unwrap();
+
+            let client = Client::new(HOST, TOKEN).unwrap();
+            let dec_resp = client.transit_decrypt(None, key_id, decoded);
+            let payload = dec_resp.unwrap();
+
+            *response.body_mut() = Body::from(format!("Decrypted: {}", base64::encode(payload)));
         }
         _ => {
             *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
@@ -61,6 +78,7 @@ async fn main() {
     pretty_env_logger::init();
 
     // Socket to listen to
+    // TODO: Add this to dotenv
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
 
     // Service to handle connections
