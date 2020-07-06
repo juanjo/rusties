@@ -29,6 +29,24 @@ async fn shutdown_signal() {
         .expect("failed to install CTRL+C signal handler");
 }
 
+fn encrypt(plaintext: &str) -> String {
+    let client = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
+    let key_id = "farm";
+    let encrypted_bytes = client.transit_encrypt(None, key_id, plaintext).unwrap();
+    let encoded_response = base64::encode(encrypted_bytes);
+    encoded_response
+}
+
+fn decrypt(cyphertext: &str) -> String {
+    let client = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
+    let decoded_text = base64::decode(cyphertext).unwrap();
+    let key_id = "farm";
+    let decrypted_bytes = client.transit_decrypt(None, key_id, decoded_text).unwrap();
+
+    let encoded_response = base64::encode(decrypted_bytes);
+    encoded_response
+}
+
 async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let mut response = Response::new(Body::empty());
 
@@ -41,12 +59,7 @@ async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
                 .unwrap()
                 .as_str();
 
-            // TODO: Move this to a function and pass the client as a reference
-            let client = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
-            let key_id = "farm";
-            let enc_resp = client.transit_encrypt(None, key_id, encrypt_str).unwrap();
-
-            *response.body_mut() = Body::from(format!("Encrypted: {}", base64::encode(enc_resp)));
+            *response.body_mut() = Body::from(format!("{}", encrypt(encrypt_str)));
         }
         (&Method::GET, path) if DECRYPT_PATH.is_match(path) => {
             let decrypt_str = DECRYPT_PATH
@@ -56,16 +69,7 @@ async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
                 .unwrap()
                 .as_str();
 
-            // TODO: Move this to a function and pass the client as a reference
-            // TODO: Pass the key_id in the URL
-            let key_id = "farm";
-            let decoded = base64::decode(decrypt_str).unwrap();
-
-            let client = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
-            let dec_resp = client.transit_decrypt(None, key_id, decoded);
-            let payload = dec_resp.unwrap();
-
-            *response.body_mut() = Body::from(format!("Decrypted: {}", base64::encode(payload)));
+            *response.body_mut() = Body::from(format!("{}", decrypt(decrypt_str)));
         }
         _ => {
             *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
