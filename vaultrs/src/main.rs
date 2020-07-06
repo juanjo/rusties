@@ -1,5 +1,6 @@
 extern crate base64;
 
+use dotenv;
 use futures::prelude::*;
 use hashicorp_vault::client::VaultClient as Client;
 use hyper::service::{make_service_fn, service_fn};
@@ -8,11 +9,12 @@ use lazy_static::lazy_static;
 use log::{debug, info, warn};
 use regex::Regex;
 use std::convert::Infallible;
+use std::env;
 use std::net::SocketAddr;
 
 /// TODO: Move this to dotenv
-const HOST: &str = "http://127.0.0.1:8200";
-const TOKEN: &str = "s.tLB4B0dfq7j9tlVCqdkoZtrE";
+const VAULT_HOST: &str = "http://127.0.0.1:8200";
+const VAULT_TOKEN: &str = "s.tLB4B0dfq7j9tlVCqdkoZtrE";
 
 // Routes Regex
 lazy_static! {
@@ -40,7 +42,7 @@ async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
                 .as_str();
 
             // TODO: Move this to a function and pass the client as a reference
-            let client = Client::new(HOST, TOKEN).unwrap();
+            let client = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
             let key_id = "farm";
             let enc_resp = client.transit_encrypt(None, key_id, encrypt_str).unwrap();
 
@@ -59,7 +61,7 @@ async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
             let key_id = "farm";
             let decoded = base64::decode(decrypt_str).unwrap();
 
-            let client = Client::new(HOST, TOKEN).unwrap();
+            let client = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
             let dec_resp = client.transit_decrypt(None, key_id, decoded);
             let payload = dec_resp.unwrap();
 
@@ -76,10 +78,12 @@ async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
+    dotenv::dotenv().expect("Failed to read .env file");
 
-    // Socket to listen to
-    // TODO: Add this to dotenv
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
+    let addr: SocketAddr = env::var("SERVICE_ADDRESS")
+        .unwrap_or_else(|_| "127.0.0.1:8080".into())
+        .parse()
+        .expect("can't parse SERVICE_ADDRESS variable");
 
     // Service to handle connections
     let service =
