@@ -2,19 +2,26 @@ extern crate base64;
 
 use dotenv;
 use futures::prelude::*;
-use hashicorp_vault::client::VaultClient as Client;
+use hashicorp_vault::client::VaultClient;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use lazy_static::lazy_static;
 use log::{debug, info, warn};
 use regex::Regex;
+use slab::*;
 use std::convert::Infallible;
 use std::env;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 
 /// TODO: Move this to dotenv
 const VAULT_HOST: &str = "http://127.0.0.1:8200";
 const VAULT_TOKEN: &str = "s.tLB4B0dfq7j9tlVCqdkoZtrE";
+
+// const vault_client: MyVaultClient = Arc::new(VaultClient::new(VAULT_HOST, VAULT_TOKEN).unwrap());
+
+type MyVaultClient = Arc<VaultClient<hashicorp_vault::client::TokenData>>;
+type mydb = Arc<Mutex<Slab<u32>>>;
 
 // Routes Regex
 lazy_static! {
@@ -30,7 +37,7 @@ async fn shutdown_signal() {
 }
 
 fn encrypt(plaintext: &str) -> String {
-    let client = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
+    let client = VaultClient::new(VAULT_HOST, VAULT_TOKEN).unwrap();
     let key_id = "farm";
     let encrypted_bytes = client.transit_encrypt(None, key_id, plaintext).unwrap();
     let encoded_response = base64::encode(encrypted_bytes);
@@ -38,7 +45,7 @@ fn encrypt(plaintext: &str) -> String {
 }
 
 fn decrypt(cyphertext: &str) -> String {
-    let client = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
+    let client = VaultClient::new(VAULT_HOST, VAULT_TOKEN).unwrap();
     let decoded_text = base64::decode(cyphertext).unwrap();
     let key_id = "farm";
     let decrypted_bytes = client.transit_decrypt(None, key_id, decoded_text).unwrap();
@@ -47,7 +54,7 @@ fn decrypt(cyphertext: &str) -> String {
     encoded_response
 }
 
-async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn requests_handler(req: Request<Body>, db: &mydb) -> Result<Response<Body>, Infallible> {
     let mut response = Response::new(Body::empty());
 
     match (req.method(), req.uri().path()) {
@@ -79,19 +86,25 @@ async fn requests_handler(req: Request<Body>) -> Result<Response<Body>, Infallib
     future::ok(response).await
 }
 
+const mydb2: mydb = Arc::new(Mutex::new(Slab::new()));
+
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
     dotenv::dotenv().expect("Failed to read .env file");
 
+    // Read SERVICE_ADDRESS env variable, otherwise use "127.0.0.1:8080"
     let addr: SocketAddr = env::var("SERVICE_ADDRESS")
         .unwrap_or_else(|_| "127.0.0.1:8080".into())
         .parse()
         .expect("can't parse SERVICE_ADDRESS variable");
 
-    // Service to handle connections
-    let service =
-        make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(requests_handler)) });
+    // let vault_client: MyVaultClient = Arc::new(VaultClient::new(VAULT_HOST, VAULT_TOKEN).unwrap());
+
+    let service = make_service_fn(move |_| {
+        // let vault_client_clone = vault_client.clone();
+        async move { Ok::<_, Infallible>(service_fn(move |req| requests_handler(req, &mydb2))) }
+    });
 
     // Bind service to the socket and serve
     let server = Server::bind(&addr).serve(service);
@@ -103,7 +116,7 @@ async fn main() {
     if let Err(e) = graceful.await {
         eprintln!("server error: {}", e);
     }
-}
+} // vault_client dies
 
 #[cfg(test)]
 mod tests {
@@ -112,12 +125,12 @@ mod tests {
 
     #[test]
     fn it_can_create_a_client() {
-        let _ = Client::new(HOST, TOKEN).unwrap();
+        let _ = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
     }
 
     #[test]
     fn it_can_transit_encryption() {
-        let client = Client::new(HOST, TOKEN).unwrap();
+        let client = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
         let res = client.transit_encrypt(None, "keyname", b"plaintext");
         assert!(res.is_ok());
     }
@@ -127,7 +140,7 @@ mod tests {
         let key_id = "test-vault-rs";
         let plaintext = b"data\0to\0encrypt";
 
-        let client = Client::new(HOST, TOKEN).unwrap();
+        let client = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
         let enc_resp = client.transit_encrypt(None, key_id, plaintext);
         let encrypted = enc_resp.unwrap();
         let dec_resp = client.transit_decrypt(None, key_id, encrypted);
@@ -137,7 +150,7 @@ mod tests {
 
     #[test]
     fn it_list_secrets() {
-        let client = Client::new(HOST, TOKEN).unwrap();
+        let client = Client::new(VAULT_HOST, VAULT_TOKEN).unwrap();
         let res = client.set_secret("hello/fred", "world");
         assert!(res.is_ok());
         let res = client.set_secret("hello/bob", "world");
